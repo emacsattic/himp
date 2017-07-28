@@ -3,12 +3,13 @@
 (defvar himp-matchers
   '(
     (python-mode
-     . (("import\\s-+[^\s-]+" . python-nav-forward-statement)
-	("from\\s-+[^\s-]+\\s-+import\\s-+[^\s-]+"
-	 . python-nav-forward-statement)
+     . ((group
+	 ("import\\s-+[^\s-]+" . python-nav-forward-statement)
+	 ("from\\s-+[^\s-]+\\s-+import\\s-+[^\s-]+"
+	  . python-nav-forward-statement)
+	 (himp-python-tryblock-matcher . himp-python-tryblock-matcher))
 	(python-info-current-line-comment-p . python-nav-forward-statement)
-	(python-info-docstring-p . python-nav-forward-statement)
-	(himp-python-tryblock-matcher . himp-python-tryblock-matcher))))
+	(python-info-docstring-p . python-nav-forward-statement))))
   "Alist of matchers per major mode.
 Each value of the alist cell is a matcher.
 A matcher can be:
@@ -18,7 +19,10 @@ A matcher can be:
     3. Cons cell (matcher . skipper).  `matcher` will be called
 	and should return non-nil if point is at a region to hide
 	(like `looking-at'), `skipper` will be called to move point
-	right after the region.")
+	right after the region.
+    4. A list of the form (group (matchers...)).  `group` is literal symbol
+	'group.  `matchers` is a list of matchers.  It can be used to group
+	 matchers together.")
 
 (defvar himp-keymap (make-keymap)
   "Keymap to use in `himp-mode'.")
@@ -52,6 +56,11 @@ A matcher can be:
 	   (functionp (cdr matcher)))
       (when (save-excursion (funcall (car matcher)))
 	(funcall (cdr matcher))))
+     ((and (listp matcher)
+	   (eq 'group (car matcher))
+	   (listp (cdr matcher)))
+      (when (save-excursion (himp-next-region-advance (cdr matcher)))
+	(himp-next-region-advance (cdr matcher))))
      (t (error "Invalid matcher: %s" matcher)))
     (unless (= start (point))
       (cons start (point)))))
