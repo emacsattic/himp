@@ -50,20 +50,29 @@ A matcher can be:
 	   (stringp (car matcher))
 	   (functionp (cdr matcher)))
       (when (looking-at (car matcher))
-	(funcall (cdr matcher))))
+	(save-restriction (funcall (cdr matcher)))))
      ((and (consp matcher)
 	   (functionp (car matcher))
 	   (functionp (cdr matcher)))
-      (when (save-excursion (funcall (car matcher)))
-	(funcall (cdr matcher))))
+      (when (save-excursion
+	      (save-restriction
+		(funcall (car matcher))))
+	(save-restriction (funcall (cdr matcher)))))
      ((and (listp matcher)
 	   (eq 'group (car matcher))
 	   (listp (cdr matcher)))
-      (when (save-excursion (himp-next-region-advance (cdr matcher)))
-	(himp-next-region-advance (cdr matcher))))
+      (when (save-excursion
+	      (save-restriction
+		(himp-next-region-advance (cdr matcher))))
+	(save-restriction
+	  (himp-next-region-advance (cdr matcher)))))
      (t (error "Invalid matcher: %s" matcher)))
     (unless (= start (point))
       (cons start (point)))))
+
+(defun himp-match-region (matcher)
+  (himp-save-restriction-widen
+   (himp-match-region-advance matcher)))
 
 (defun himp-next-region-advance (matchers)
   (catch 'result
@@ -91,11 +100,48 @@ A matcher can be:
 	  (add-to-list 'result (setq lastmatch match) t)))
       (mapcar 'cdr result))))
 
+(defun himp-python-narrow-to-block ()
+  (save-excursion
+    (let ((indentation (current-indentation))
+	  (start (line-beginning-position))
+	  (end (line-end-position)))
+      (while (and (> (point) (point-min))
+		  (or (>= (current-indentation) indentation)
+		      (python-info-current-line-empty-p)
+		      (python-info-current-line-comment-p)))
+	(setq start (line-beginning-position))
+	(forward-line -1)
+	(beginning-of-line))
+      (goto-char end)
+      (while (and (< (point) (point-max))
+		  (or (>= (current-indentation) indentation)
+		      (python-info-current-line-empty-p)
+		      (python-info-current-line-comment-p)))
+	(setq end (line-end-position))
+	(forward-line)
+	(end-of-line))
+      (narrow-to-region start end))))
+
 (defun himp-python-tryblock-matcher ()
-  (when (himp-match-region-advance "try\\s-*:")
-    (himp-skip-matches (alist-get 'python-mode himp-matchers))
-    (when (himp-match-region-advance "except[^:]*:")
-      (> (himp-skip-matches (alist-get 'python-mode himp-matchers)) 0))))
+  (catch 'result
+    (when (himp-match-region-advance "try\\s-*:")
+      (himp-python-narrow-to-block)
+      (himp-skip-matches (alist-get 'python-mode himp-matchers))
+      (let* ((matchers (append
+			'("pass\\b")
+			(alist-get 'python-mode himp-matchers)))
+	     (except
+	      (when (himp-match-region "except[^:]*:")
+		(while (himp-match-region-advance "except[^:]*:")
+		  (when (= (himp-skip-matches matchers) 0)
+		    (throw 'result nil)))
+		t))
+	     (finally
+	      (when (himp-match-region-advance "finally\\s-*:")
+		(if (= (himp-skip-matches matchers) 0)
+		    (throw 'result nil)
+		  t))))
+	(or except finally)))))
 
 (defmacro himp-save-restriction-widen (&rest body)
   "Save excursion and restriction; widen; evaluate BODY."
