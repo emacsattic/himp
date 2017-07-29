@@ -1,5 +1,14 @@
 (require 'vimish-fold)
 
+(defgroup himp nil
+  "Hide uninteresting parts (imports) at beginning of buffer."
+  :group 'programming)
+
+(defcustom himp-show-line-count nil
+  "If non-nil, show number of lines in hidden regions."
+  :type 'boolean
+  :group 'himp)
+
 (defvar himp-matchers
   '(
     (python-mode
@@ -34,22 +43,22 @@ A matcher can be:
   (while (cond
 	  ((looking-at-p "\\s-")
 	   (forward-char) t)
-	  ((and (looking-at-p "$")
-		(not (= (point) (point-max))))
+	  ((and (eolp) (not (eobp)))
 	   (forward-line)
 	   (beginning-of-line) t)
 	  (t nil))))
 
 (defun himp-match-region-advance (matcher)
+  (himp-skip-space)
   (let ((start (point)))
     (cond
      ((stringp matcher)
       (when (looking-at matcher)
-	(re-search-forward matcher)))
+	(goto-char (match-end 0))))
      ((and (consp matcher)
 	   (stringp (car matcher))
 	   (functionp (cdr matcher)))
-      (when (looking-at (car matcher))
+      (when (looking-at-p (car matcher))
 	(save-restriction (funcall (cdr matcher)))))
      ((and (consp matcher)
 	   (functionp (car matcher))
@@ -71,13 +80,12 @@ A matcher can be:
       (cons start (point)))))
 
 (defun himp-match-region (matcher)
-  (himp-save-restriction-widen
+  (save-excursion
    (himp-match-region-advance matcher)))
 
 (defun himp-next-region-advance (matchers)
   (catch 'result
     (ignore
-     (himp-skip-space)
      (dolist (matcher matchers)
        (let ((region (himp-match-region-advance matcher)))
 	 (when region
@@ -90,7 +98,7 @@ A matcher can be:
     count))
 
 (defun himp-find-regions ()
-  (let ((matchers (alist-get major-mode himp-matchers)))
+  (let ((matchers (cdr (assoc major-mode himp-matchers))))
     (unless matchers
       (error "No matchers for %s" major-mode))
     (let (result match lastmatch)
@@ -126,10 +134,10 @@ A matcher can be:
   (catch 'result
     (when (himp-match-region-advance "try\\s-*:")
       (himp-python-narrow-to-block)
-      (himp-skip-matches (alist-get 'python-mode himp-matchers))
+      (himp-skip-matches (cdr (assoc 'python-mode himp-matchers)))
       (let* ((matchers (append
 			'("pass\\b")
-			(alist-get 'python-mode himp-matchers)))
+			(cdr (assoc 'python-mode himp-matchers))))
 	     (except
 	      (when (himp-match-region "except[^:]*:")
 		(while (himp-match-region-advance "except[^:]*:")
@@ -143,40 +151,58 @@ A matcher can be:
 		  t))))
 	(or except finally)))))
 
-(defmacro himp-save-restriction-widen (&rest body)
-  "Save excursion and restriction; widen; evaluate BODY."
-  `(save-excursion
-     (save-restriction
-       (widen)
-       ,@body)))
+(defun himp--delete-fold (marker)
+  "Remove fold at MARKER."
+  (save-excursion
+    (save-restriction
+      (widen)
+      (goto-char marker)
+      (ignore-errors
+	(vimish-fold-delete)))))
+
+(defun himp--make-fold (beg end)
+  "Make fold in range BEG END."
+  (condition-case err
+      (let* ((vimish-fold-show-lines himp-show-line-count)
+	     (header-line-length
+	      (save-excursion
+		(goto-char beg)
+		(length (thing-at-point 'line))))
+	     (orig-header-width
+	      (and (boundp 'vimish-fold-header-width)
+		   vimish-fold-header-width))
+	     (vimish-fold-header-width
+	      (if vimish-fold-show-lines
+		  orig-header-width
+		header-line-length)))
+	(vimish-fold beg end))
+    (error
+     (message "Vimish-fold error: '%s' on region %s %s" err beg end))))
 
 (defun himp-unhide ()
   "Unhide regions hidden with `himp-hide'."
   (interactive)
   (dolist (region himp--regions)
-    (himp-save-restriction-widen
-     (goto-char region)
-     (ignore-errors
-       (vimish-fold-delete))
-     (set-marker region nil)))
+    (himp--delete-fold region)
+    (set-marker region nil))
   (setq himp--regions nil))
 
 (defun himp-hide ()
   "Hide uninteresting regions in current buffer."
   (interactive)
   (himp-unhide)
-  (himp-save-restriction-widen
-   (goto-char (point-min))
-   (dolist (region (himp-find-regions))
-     (let ((start (car region))
-	   (end (cdr region))
-	   (marker (make-marker)))
-       (condition-case err
-	   (vimish-fold start end)
-	 (error (message "Vimish-fold error: '%s' on region %s" err region)))
-       (set-marker marker start)
-       (set-marker-insertion-type marker t)
-       (add-to-list 'himp--regions marker)))))
+  (save-excursion
+    (save-restriction
+      (widen)
+      (goto-char (point-min))
+      (dolist (region (himp-find-regions))
+	(let ((start (car region))
+	      (end (cdr region))
+	      (marker (make-marker)))
+	  (himp--make-fold start end)
+	  (set-marker marker start)
+	  (set-marker-insertion-type marker t)
+	  (add-to-list 'himp--regions marker))))))
 
 (define-minor-mode himp-mode
   "Hide imports/uninteresting stuff at beginning of buffer."
