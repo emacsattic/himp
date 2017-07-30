@@ -13,12 +13,12 @@
   '(
     (python-mode
      . ((group
-	 ("import\\s-+[^\s-]+" . python-nav-forward-statement)
+	 ("import\\s-+[^\s-]+" . python-nav-forward-sexp-safe)
 	 ("from\\s-+[^\s-]+\\s-+import\\s-+[^\s-]+"
-	  . python-nav-forward-statement)
+	  . python-nav-forward-sexp-safe)
 	 (himp-python-tryblock-matcher . himp-python-tryblock-matcher))
-	(python-info-current-line-comment-p . python-nav-forward-statement)
-	(python-info-docstring-p . python-nav-forward-statement))))
+	(himp-python-comment-matcher . python-nav-forward-sexp-safe)
+	(python-info-docstring-p . python-nav-forward-sexp-safe))))
   "Alist of matchers per major mode.
 Each value of the alist cell is a matcher.
 A matcher can be:
@@ -108,48 +108,75 @@ A matcher can be:
 	  (add-to-list 'result (setq lastmatch match) t)))
       (mapcar 'cdr result))))
 
-(defun himp-python-narrow-to-block ()
+(defun himp--python-narrow-to-tryblock ()
   (save-excursion
-    (let ((indentation (current-indentation))
-	  (start (line-beginning-position))
-	  (end (line-end-position)))
-      (while (and (> (point) (point-min))
-		  (or (>= (current-indentation) indentation)
-		      (python-info-current-line-empty-p)
-		      (python-info-current-line-comment-p)))
-	(setq start (line-beginning-position))
-	(forward-line -1)
-	(beginning-of-line))
-      (goto-char end)
-      (while (and (< (point) (point-max))
-		  (or (>= (current-indentation) indentation)
-		      (python-info-current-line-empty-p)
-		      (python-info-current-line-comment-p)))
-	(setq end (line-end-position))
-	(forward-line)
-	(end-of-line))
-      (narrow-to-region start end))))
+    (let ((start (line-beginning-position))
+	  (indentation (current-indentation))
+	  last-non-comment)
+      (catch 'done
+	(while (progn
+		 (forward-line)
+		 (end-of-line)
+		 t)
+	  (back-to-indentation)
+	  (cond
+	   ((or
+	     (and (python-info-current-line-comment-p)
+		  (> (current-indentation) indentation))
+	     (> (current-indentation) indentation)
+	     (and (= (current-indentation) indentation)
+		  (looking-at-p "except\\b\\|finally\\b")))
+	    (setq last-non-comment (line-end-position)))
+	   ((or
+	     (python-info-current-line-empty-p)
+	     (and (<= (current-indentation) indentation)
+		  (python-info-current-line-comment-p))))
+	   (t
+	    (forward-line -1)
+	    (throw 'done nil)))
+	  (when (= (line-end-position) (point-max))
+	    (throw 'done nil))))
+      (narrow-to-region start (or last-non-comment (point))))))
+
+(defvar himp--python-inside-tryblock nil
+  "Non-nil when point is inside tryblock.")
 
 (defun himp-python-tryblock-matcher ()
   (catch 'result
     (when (himp-match-region-advance "try\\s-*:")
-      (himp-python-narrow-to-block)
-      (himp-skip-matches (cdr (assoc 'python-mode himp-matchers)))
-      (let* ((matchers (append
-			'("pass\\b")
-			(cdr (assoc 'python-mode himp-matchers))))
-	     (except
-	      (when (himp-match-region "except[^:]*:")
-		(while (himp-match-region-advance "except[^:]*:")
-		  (when (= (himp-skip-matches matchers) 0)
-		    (throw 'result nil)))
-		t))
-	     (finally
-	      (when (himp-match-region-advance "finally\\s-*:")
-		(if (= (himp-skip-matches matchers) 0)
-		    (throw 'result nil)
-		  t))))
-	(or except finally)))))
+      (let ((himp--python-inside-tryblock t))
+	(himp--python-narrow-to-tryblock)
+	(when (zerop
+	       (himp-skip-matches (cdr (assoc 'python-mode himp-matchers))))
+	  (throw 'result nil))
+	(let* ((matchers (append
+			  '("pass\\b")
+			  (cdr (assoc 'python-mode himp-matchers))))
+	       (except
+		(when (himp-match-region "except[^:]*:")
+		  (while (himp-match-region-advance "except[^:]*:")
+		    (when (zerop (himp-skip-matches matchers))
+		      (throw 'result nil)))
+		  t))
+	       (finally
+		(when (himp-match-region-advance "finally\\s-*:")
+		  (if (zerop (himp-skip-matches matchers))
+		      (throw 'result nil)
+		    t))))
+	  (or except finally))))))
+
+(defun himp-python-comment-matcher ()
+  (when (python-info-current-line-comment-p)
+    (forward-line)
+    (or
+     himp--python-inside-tryblock
+     (save-excursion
+       (himp-next-region-advance
+	(cdr (assoc 'python-mode himp-matchers))))
+     (save-excursion
+       (and (prog1 (python-info-current-line-empty-p)
+	      (forward-line))
+	    (python-info-current-line-empty-p))))))
 
 (defun himp--delete-fold (marker)
   "Remove fold at MARKER."
