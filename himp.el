@@ -9,6 +9,11 @@
   :type 'boolean
   :group 'himp)
 
+(defcustom himp-rescan-on-save t
+  "If non-nil, rescan buffer after saving buffer to file."
+  :type 'boolean
+  :group 'himp)
+
 (defvar himp-matchers
   '(
     (python-mode
@@ -231,10 +236,16 @@ A matcher can be:
 	  (set-marker-insertion-type marker t)
 	  (add-to-list 'himp--regions marker))))))
 
+(defun himp-handle-save ()
+  (and himp-mode himp-rescan-on-save (himp-hide)))
+
 (define-minor-mode himp-mode
   "Hide imports/uninteresting stuff at beginning of buffer."
   :lighter " himp"
   :keymap himp-keymap
   (if himp-mode
-      (himp-hide)
-    (himp-unhide)))
+      (progn
+	(himp-hide)
+	(add-hook 'after-save-hook 'himp-handle-save nil t))
+    (himp-unhide)
+    (remove-hook 'after-save-hook 'himp-handle-save t)))
