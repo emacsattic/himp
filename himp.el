@@ -23,7 +23,11 @@
 	  . python-nav-forward-sexp-safe)
 	 (himp-python-tryblock-matcher . himp-python-tryblock-matcher))
 	(himp-python-comment-matcher . python-nav-forward-sexp-safe)
-	(python-info-docstring-p . python-nav-forward-sexp-safe))))
+	(python-info-docstring-p . python-nav-forward-sexp-safe)))
+    (java-mode
+     . ((himp-java-comment-matcher . c-forward-single-comment)
+	("package\\b[^;]+;" . c-end-of-statement)
+	("import\\b[^;]+;" . c-end-of-statement))))
   "Alist of matchers per major mode.
 Each value of the alist cell is a matcher.
 A matcher can be:
@@ -182,6 +186,12 @@ A matcher can be:
        (and (prog1 (python-info-current-line-empty-p)
 	      (forward-line))
 	    (python-info-current-line-empty-p))))))
+
+(defun himp-java-comment-matcher ()
+  "Match non-javadoc comments."
+  (and
+   (not (looking-at-p "/\\*\\*"))
+   (c-forward-single-comment)))
 
 (defun himp--delete-fold (marker)
   "Remove fold at MARKER."
