@@ -35,10 +35,6 @@
 ;; (add-hook 'java-mode-hook 'himp-mode)
 ;;
 ;; Now imports at beginning of buffer will be hidden when himp-mode is active.
-;; You can also bind toggle function to a key:
-;;
-;; (define-key python-mode-map (kbd "C-c y") 'himp-mode-toggle)
-;; (define-key java-mode-map (kbd "C-c y") 'himp-mode-toggle)
 ;;
 ;; Currently, python and java modes are supported, but the package can
 ;; easily be extended to support other languages.  See documentation for
@@ -51,11 +47,7 @@
 
 (eval-when-compile
   (require 'python)
-  (require 'cc-mode)
-  (declare-function python-nav-end-of-block "python.el")
-  (declare-function python-info-current-line-comment-p "python.el")
-  (declare-function python-info-current-line-empty-p "python.el")
-  (declare-function c-forward-single-comment "cc-mode.el"))
+  (require 'cc-mode))
 
 (defgroup himp nil
   "Hide uninteresting regions (imports, comments) at beginning of buffer."
@@ -71,14 +63,14 @@
   :type 'boolean
   :group 'himp)
 
-(defvar himp-matchers
+(defcustom himp-matchers
   '(
     (python-mode
      . ((group
-         ("import\\s-+[^\s-]+" . python-nav-forward-sexp-safe)
-         ("from\\s-+[^\s-]+\\s-+import\\s-+[^\s-]+"
-          . python-nav-forward-sexp-safe)
-         (himp-python-tryblock-matcher . himp-python-tryblock-matcher))
+         (("import\\s-+[^\s-]+" . python-nav-forward-sexp-safe)
+          ("from\\s-+[^\s-]+\\s-+import\\s-+[^\s-]+"
+           . python-nav-forward-sexp-safe)
+          (himp-python-tryblock-matcher . himp-python-tryblock-matcher)))
         (himp-python-comment-matcher . python-nav-forward-sexp-safe)
         (python-info-docstring-p . python-nav-forward-sexp-safe)))
     (java-mode
@@ -95,9 +87,26 @@ A matcher can be:
         and should return non-nil if point is at a region to hide
         (like `looking-at'), `skipper` will be called to move point
         right after the region.
-    4. A list of the form (group (matchers...)).  `group` is literal symbol
-        'group.  `matchers` is a list of matchers.  It can be used to group
-         matchers together.")
+    4. 2-element list of the form (group matchers).  `group` is literal
+        symbol 'group.  `matchers` is a list of matchers.  It can be used to
+         group matchers together."
+  :type (let ((choices '(choice
+                         regexp
+                         (cons
+                          :tag "Regexp, skip function"
+                          regexp (function :tag "Skip function"))
+                         (cons
+                          :tag "Match function, skip function"
+                          (function :tag "Match function")
+                          (function :tag "Skip function")))))
+          (setq choices
+                (append choices
+                        `((list :tag "Group"
+                                (const group)
+                                (repeat :tag "Matchers" ,choices)))))
+          `(alist :key-type (symbol :tag "Major mode")
+                  :value-type (repeat :tag "Matchers" ,choices)))
+  :group 'himp)
 
 (defvar himp-keymap (make-keymap)
   "Keymap to use in himp mode, enabled with command `himp-mode'.")
@@ -140,12 +149,12 @@ Returns cons cell (start . end) which is the matched region
         (save-restriction (funcall (cdr matcher)))))
      ((and (listp matcher)
            (eq 'group (car matcher))
-           (listp (cdr matcher)))
+           (listp (cadr matcher)))
       (when (save-excursion
               (save-restriction
-                (himp-next-region-advance (cdr matcher))))
+                (himp-next-region-advance (cadr matcher))))
         (save-restriction
-          (himp-next-region-advance (cdr matcher)))))
+          (himp-next-region-advance (cadr matcher)))))
      (t (error "Invalid matcher: %s" matcher)))
     (unless (= start (point))
       (cons start (point)))))
@@ -314,12 +323,6 @@ should be hidden or 2 empty lines."
           (set-marker marker start)
           (set-marker-insertion-type marker t)
           (add-to-list 'himp--regions marker))))))
-
-;;;###autoload
-(defun himp-mode-toggle ()
-  "Toggle state of himp mode."
-  (interactive)
-  (himp-mode (if himp-mode 0 1)))
 
 (defun himp-handle-save ()
   "Rescan buffer if `himp-rescan-on-save' is non-nil."
