@@ -79,6 +79,8 @@
         ("import\\b[^;]+;" . c-end-of-statement))))
   "Alist of matchers per major mode.
 Each value of the alist cell is a list of matchers.
+The key of the cell is a major mode symbol.  When there is no entry for a major
+mode, entry for parent mode is used, if it exists.
 A matcher can be:
     1. A regex.
     2. Cons cell (regex . function).  `regex` will match a region
@@ -113,6 +115,27 @@ A matcher can be:
 
 (defvar-local himp--regions nil
   "Markers at hidden regions in current buffer.")
+
+(defun himp--get-parent-modes (mode)
+  "Get parent modes of MODE."
+  (let (result)
+    (while (let ((parent (get mode 'derived-mode-parent)))
+             (when parent
+               (add-to-list 'result parent t)
+               (setq mode parent))))
+    result))
+
+(defun himp--get-matchers (&optional mode)
+  "Get matchers for given major mode MODE from variable `himp-matchers'.
+MODE defaults to current major mode.
+If there is no matcher for MODE, try to find matchers for parent mode."
+  (or mode (setq mode major-mode))
+  (cdr
+   (or (assoc mode himp-matchers)
+       (catch 'parent
+         (dolist (parent (himp--get-parent-modes mode))
+           (when (assoc parent himp-matchers)
+             (throw 'parent (assoc parent himp-matchers))))))))
 
 (defun himp-skip-space ()
   "Skip whitespace following point."
@@ -187,7 +210,7 @@ Returns number of matches skipped."
   "Find all regions (after point) that should be hidden in this major mode.
 Returns a list of matches (like `himp-match-region-advance').
 Adjacent regions matched by the same matcher are merged into one."
-  (let ((matchers (cdr (assoc major-mode himp-matchers))))
+  (let ((matchers (himp--get-matchers)))
     (unless matchers
       (error "No matchers for %s" major-mode))
     (let (result match lastmatch)
@@ -228,11 +251,11 @@ tryblocks or comments."
       (let ((himp--python-inside-tryblock t))
         (himp--python-narrow-to-tryblock)
         (when (zerop
-               (himp-skip-matches (cdr (assoc 'python-mode himp-matchers))))
+               (himp-skip-matches (himp--get-matchers 'python-mode)))
           (throw 'result nil))
         (let* ((matchers (append
                           '("pass\\b")
-                          (cdr (assoc 'python-mode himp-matchers))))
+                          (himp--get-matchers 'python-mode)))
                (except
                 (when (himp-match-region "except[^:]*:")
                   (while (himp-match-region-advance "except[^:]*:")
@@ -256,7 +279,7 @@ should be hidden or 2 empty lines."
      himp--python-inside-tryblock
      (save-excursion
        (himp-next-region-advance
-        (cdr (assoc 'python-mode himp-matchers))))
+        (himp--get-matchers 'python-mode)))
      (save-excursion
        (and (prog1 (python-info-current-line-empty-p)
               (forward-line))
