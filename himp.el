@@ -1,9 +1,9 @@
 ;;; himp.el --- Automatically hide imports/documentation
 
-;; Copyright (C) 2017 Michał Kondraciuk
+;; Copyright (C) 2017 Michał Krzywkowski
 
 ;;
-;; Author: Michał Kondraciuk <k.michal@zoho.com>
+;; Author: Michał Krzywkowski <k.michal@zoho.com>
 ;; URL: http://github.com/mkcms/himp/
 ;; Package-Requires: ((emacs "24.3") (vimish-fold "0.1.0"))
 ;; Version: 0.1
